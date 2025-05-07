@@ -5,13 +5,6 @@
 //  Created by Stanley Yu on 4/5/25.
 //
 
-//
-//  WeatherApp.swift
-//  WeatherApp
-//
-//  Created by Stanley Yu on 4/5/25.
-//
-
 import SwiftUI
 
 struct WeatherApp: View {

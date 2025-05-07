@@ -5,6 +5,7 @@
 //  Created by Stanley Yu on 4/5/25.
 //
 import Foundation
+import Combine
 
 class WeatherViewModel: ObservableObject {
     @Published var weather: WeatherData?
@@ -13,82 +14,63 @@ class WeatherViewModel: ObservableObject {
     @Published var errorMessage: String?
     
     let apiKey = "3535447ce362cc4b8779463161ecbee7"
+    private var cancellables = Set<AnyCancellable>()
     
     func fetchWeather(for city: String) {
         isLoading = true
         errorMessage = nil
         location = city
         
-        let geocodingURLStr = "https://api.openweathermap.org/geo/1.0/direct?q=\(city.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? city)&limit=1&appid=\(apiKey)"
-        
-        guard let geocodingURL = URL(string: geocodingURLStr) else {
-            handleError(message: "Invalid Geocoding URL")
-            return
-        }
-        
-        URLSession.shared.dataTask(with: geocodingURL) { [weak self] geocodingData, _, geocodingError in
-            guard let self = self else { return }
-            
-            if let geocodingError = geocodingError {
-                self.handleError(message: "Geocoding error: \(geocodingError.localizedDescription)")
-                return
+        fetchCoordinates(for: city)
+            .flatMap { coordinates in
+                self.fetchWeatherData(lat: coordinates.lat, lon: coordinates.lon)
             }
-            
-            guard let geocodingData = geocodingData else {
-                self.handleError(message: "No geocoding data received")
-                return
-            }
-            
-            do {
-                let geocodingResponse = try JSONDecoder().decode([GeocodingResponse].self, from: geocodingData)
-                
-                guard let firstLocation = geocodingResponse.first else {
-                    self.handleError(message: "Location not found")
-                    return
-                }
-                
-                let weatherURLStr = "https://api.openweathermap.org/data/2.5/weather?lat=\(firstLocation.lat)&lon=\(firstLocation.lon)&appid=\(self.apiKey)&units=imperial"
-                
-                guard let weatherURL = URL(string: weatherURLStr) else {
-                    self.handleError(message: "Invalid Weather URL")
-                    return
-                }
-                
-                URLSession.shared.dataTask(with: weatherURL) { [weak self] weatherData, _, weatherError in
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] completion in
                     guard let self = self else { return }
+                    self.isLoading = false
                     
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-                        
-                        if let weatherError = weatherError {
-                            self.handleError(message: "Weather error: \(weatherError.localizedDescription)")
-                            return
-                        }
-                        
-                        guard let weatherData = weatherData else {
-                            self.handleError(message: "No weather data received")
-                            return
-                        }
-                        
-                        do {
-                            self.weather = try JSONDecoder().decode(WeatherData.self, from: weatherData)
-                            self.errorMessage = nil
-                        } catch {
-                            self.handleError(message: "Weather decoding error: \(error.localizedDescription)")
-                        }
+                    if case .failure(let error) = completion {
+                        self.errorMessage = error.localizedDescription
                     }
-                }.resume()
-                
-            } catch {
-                self.handleError(message: "Geocoding decoding error: \(error.localizedDescription)")
-            }
-        }.resume()
+                },
+                receiveValue: { [weak self] weatherData in
+                    self?.weather = weatherData
+                }
+            )
+            .store(in: &cancellables)
     }
     
-    private func handleError(message: String) {
-        DispatchQueue.main.async {
-            self.isLoading = false
-            self.errorMessage = message
+    private func fetchCoordinates(for city: String) -> AnyPublisher<(lat: Double, lon: Double), Error> {
+        let urlString = "https://api.openweathermap.org/geo/1.0/direct?q=\(city.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? city)&limit=1&appid=\(apiKey)"
+        
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
+        
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map(\.data)
+            .decode(type: [GeocodingResponse].self, decoder: JSONDecoder())
+            .tryMap { responses in
+                guard let first = responses.first else {
+                    throw URLError(.cannotFindHost)
+                }
+                return (lat: first.lat, lon: first.lon)
+            }
+            .eraseToAnyPublisher()
+    }
+    
+    private func fetchWeatherData(lat: Double, lon: Double) -> AnyPublisher<WeatherData, Error> {
+        let urlString = "https://api.openweathermap.org/data/2.5/weather?lat=\(lat)&lon=\(lon)&appid=\(apiKey)&units=imperial"
+        
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+        
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map(\.data)
+            .decode(type: WeatherData.self, decoder: JSONDecoder())
+            .eraseToAnyPublisher()
     }
 }
