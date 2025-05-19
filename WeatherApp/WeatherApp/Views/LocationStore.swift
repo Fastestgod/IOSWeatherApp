@@ -4,43 +4,59 @@
 //
 //  Created by Stanley Yu on 5/6/25.
 //
+
 import Foundation
+import SwiftUI
 import Combine
 
 class LocationStore: ObservableObject {
-    @Published var savedLocations: [String]
-    @Published var locationCoordinates: [String: String]
+    // For simple String array
+    @AppStorage("savedLocations") private var savedLocationsData: Data = Data()
+    // For coordinates 
+    @AppStorage("locationCoordinates") private var locationCoordinatesData: Data = Data()
+    
+    var savedLocations: [String] {
+        get {
+            (try? JSONDecoder().decode([String].self, from: savedLocationsData)) ?? ["New York"]
+        }
+        set {
+            savedLocationsData = (try? JSONEncoder().encode(newValue)) ?? Data()
+        }
+    }
+    
+    var locationCoordinates: [String: String] {
+        get {
+            (try? JSONDecoder().decode([String: String].self, from: locationCoordinatesData)) ?? [:]
+        }
+        set {
+            locationCoordinatesData = (try? JSONEncoder().encode(newValue)) ?? Data()
+        }
+    }
     
     private let apiKey: String
     private var cancellables = Set<AnyCancellable>()
-    private let userDefaultsKey = "savedLocations"
-    private let coordinatesKey = "locationCoordinates"
     
     init(apiKey: String) {
         self.apiKey = apiKey
-        self.savedLocations = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] ?? ["New York"]
-        self.locationCoordinates = UserDefaults.standard.dictionary(forKey: coordinatesKey) as? [String: String] ?? [:]
-        
-        // Fetch coordinates for any locations that don't have them
         fetchMissingCoordinates()
     }
     
+    // Rest of your existing methods remain exactly the same
     func addLocation(_ location: String) -> AnyPublisher<Void, Error> {
         let trimmed = location.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Check for duplicates
         if savedLocations.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-            return Fail(error: NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Location already exists"])).eraseToAnyPublisher()
+            return Fail(error: NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Location already exists"]))
+                .eraseToAnyPublisher()
         }
         
         savedLocations.append(trimmed)
-        saveToUserDefaults()
         
         return fetchCoordinates(for: trimmed)
             .map { coordinates in
-                let coordString = String(format: "Lat: %.4f, Lon: %.4f", coordinates.lat, coordinates.lon)
-                self.locationCoordinates[trimmed] = coordString
-                self.saveCoordinatesToStorage()
+                var currentCoords = self.locationCoordinates
+                currentCoords[trimmed] = String(format: "Lat: %.4f, Lon: %.4f", coordinates.lat, coordinates.lon)
+                self.locationCoordinates = currentCoords
                 return ()
             }
             .eraseToAnyPublisher()
@@ -48,9 +64,9 @@ class LocationStore: ObservableObject {
     
     func removeLocation(_ location: String) {
         savedLocations.removeAll { $0 == location }
-        locationCoordinates.removeValue(forKey: location)
-        saveToUserDefaults()
-        saveCoordinatesToStorage()
+        var currentCoords = locationCoordinates
+        currentCoords.removeValue(forKey: location)
+        locationCoordinates = currentCoords
     }
     
     private func fetchMissingCoordinates() {
@@ -61,9 +77,9 @@ class LocationStore: ObservableObject {
                     .sink(
                         receiveCompletion: { _ in },
                         receiveValue: { coordinates in
-                            let coordString = String(format: "Lat: %.4f, Lon: %.4f", coordinates.lat, coordinates.lon)
-                            self.locationCoordinates[location] = coordString
-                            self.saveCoordinatesToStorage()
+                            var currentCoords = self.locationCoordinates
+                            currentCoords[location] = String(format: "Lat: %.4f, Lon: %.4f", coordinates.lat, coordinates.lon)
+                            self.locationCoordinates = currentCoords
                         }
                     )
                     .store(in: &cancellables)
@@ -88,14 +104,4 @@ class LocationStore: ObservableObject {
             }
             .eraseToAnyPublisher()
     }
-    
-    private func saveToUserDefaults() {
-        UserDefaults.standard.set(savedLocations, forKey: userDefaultsKey)
-    }
-    
-    private func saveCoordinatesToStorage() {
-        UserDefaults.standard.set(locationCoordinates, forKey: coordinatesKey)
-    }
 }
-
-

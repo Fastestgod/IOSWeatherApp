@@ -4,11 +4,6 @@
 //
 //  Created by Stanley Yu on 4/5/25.
 //
-//
-//  WeatherData.swift
-//  WeatherApp
-//
-
 import Foundation
 
 struct WeatherData: Decodable {
@@ -42,27 +37,30 @@ struct WeatherData: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        // Decode coordinates (optional)
-        coordinates = try? container.decode(Coordinates.self, forKey: .coord)
-
-        // Decode main weather data
+        
+        // Main data
         let main = try container.nestedContainer(keyedBy: MainKeys.self, forKey: .main)
         temperature = try main.decode(Double.self, forKey: .temp)
-
-        // Decode wind data
+        
+        // Wind data
         let wind = try container.nestedContainer(keyedBy: WindKeys.self, forKey: .wind)
         windSpeed = try wind.decode(Double.self, forKey: .speed)
-
-        // Decode rain chance (optional)
-        let rainContainer = try? container.nestedContainer(keyedBy: RainKeys.self, forKey: .rain)
-        rainChance = try rainContainer?.decode(Double.self, forKey: .oneHour) ?? 0.0
-
-        // Decode weather conditions
+        
+        // Weather conditions
         var weatherArray = try container.nestedUnkeyedContainer(forKey: .weather)
         let weather = try weatherArray.nestedContainer(keyedBy: WeatherKeys.self)
         iconCode = try weather.decode(String.self, forKey: .icon)
         description = try weather.decode(String.self, forKey: .description)
+        
+        // Optional rain data
+        if let rainContainer = try? container.nestedContainer(keyedBy: RainKeys.self, forKey: .rain) {
+            rainChance = try rainContainer.decode(Double.self, forKey: .oneHour)
+        } else {
+            rainChance = 0.0
+        }
+        
+        // Coordinates
+        coordinates = try? container.decode(Coordinates.self, forKey: .coord)
     }
 
     enum WeatherKeys: String, CodingKey {
@@ -87,7 +85,6 @@ struct WeatherData: Decodable {
     }
 }
 
-// Geocoding Response Model (nested in same file)
 struct GeocodingResponse: Decodable {
     let name: String
     let lat: Double
